@@ -142,7 +142,7 @@ public class MapPickerActivity extends Activity
         // we dont need these buttons
         select = findViewById(R.id.select);
         select.setEnabled(false);
-        findViewById(R.id.select_text).setEnabled(false);
+        // findViewById(R.id.select_text).setEnabled(false);
         select.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
