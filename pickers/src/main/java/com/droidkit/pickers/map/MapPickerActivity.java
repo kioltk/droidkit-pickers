@@ -154,13 +154,13 @@ public class MapPickerActivity extends Activity
                 finish();
             }
         });
-        View cancel = findViewById(R.id.cancel);
+        /*View cancel = findViewById(R.id.cancel);
         cancel.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
                 finish();
             }
-        });
+        });*/
     }
 
     private int defaultHeight = 0;
