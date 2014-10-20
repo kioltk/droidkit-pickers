@@ -41,10 +41,7 @@ public class PictureItem extends FileItem {
         }
     }
 
-    @Override
-    public String getSubtitle(Context context) {
-        return null;
-    }
+
 
     @Override
     public void bindImage(final View itemView) {

@@ -449,7 +449,7 @@ public class MapPickerActivity extends Activity
     public void onItemClick(AdapterView<?> adapterView, View view, int position, long l) {
         MapItem mapItem = (MapItem) adapterView.getItemAtPosition(position);
 
-
+        // todo show on bottom bar?
         Intent returnIntent = new Intent();
         returnIntent.putExtra("latitude", mapItem.getLatLng().latitude);
         returnIntent.putExtra("longitude", mapItem.getLatLng().longitude);
