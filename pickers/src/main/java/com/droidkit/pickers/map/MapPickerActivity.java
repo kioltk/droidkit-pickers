@@ -27,6 +27,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import com.droidkit.file.R;
+import com.droidkit.pickers.map.util.OrientationHelper;
 import com.droidkit.pickers.view.SearchViewHacker;
 import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
@@ -169,7 +170,11 @@ public class MapPickerActivity extends Activity
         if (listHolder.getVisibility() == View.GONE) {
 
             fullSizeButton.setEnabled(false);
-            float startSize = findViewById(R.id.container).getHeight();
+            float startSize;
+            if(OrientationHelper.getScreenOrientation(getWindowManager())==OrientationHelper.LANDSCAPE){
+                startSize = findViewById(R.id.container).getWidth();
+            }else
+                startSize = findViewById(R.id.container).getHeight();
 
             final ValueAnimator valueAnimator = ValueAnimator.ofFloat(startSize, defaultHeight);
             valueAnimator.setDuration(300);
@@ -177,7 +182,12 @@ public class MapPickerActivity extends Activity
             valueAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
                 @Override
                 public void onAnimationUpdate(ValueAnimator valueAnimator) {
-                    mapHolder.getLayoutParams().height = ((Float) valueAnimator.getAnimatedValue()).intValue();
+
+                    if(OrientationHelper.getScreenOrientation(getWindowManager())==OrientationHelper.LANDSCAPE) {
+                        mapHolder.getLayoutParams().width = ((Float) valueAnimator.getAnimatedValue()).intValue();
+                    }else{
+                        mapHolder.getLayoutParams().height = ((Float) valueAnimator.getAnimatedValue()).intValue();
+                    }
                     mapHolder.requestLayout();
                 }
             });
