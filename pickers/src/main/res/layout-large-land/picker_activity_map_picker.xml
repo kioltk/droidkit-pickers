@@ -16,7 +16,8 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:id="@+id/map"
-            android:name="com.google.android.gms.maps.MapFragment"/>
+            android:name="com.google.android.gms.maps.MapFragment"
+            tools:layout="@layout/picker_map_fake_fragment" />
         <ImageButton
             android:id="@+id/full"
             android:layout_alignParentLeft="true"
@@ -125,7 +126,7 @@
     <RelativeLayout
         android:background="#fff"
         android:layout_alignParentBottom="true"
-        android:id="@+id/controllers1"
+        android:id="@+id/controllers"
         android:visibility="gone"
         android:layout_width="match_parent"
         android:layout_height="70dp">
@@ -156,11 +157,4 @@
             android:layout_width="70dp"
             android:layout_height="70dp" />
         </RelativeLayout>
-    <LinearLayout
-        android:visibility="gone"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content">
-
-        <include  layout="@layout/picker_controllers" />
-        </LinearLayout>
 </RelativeLayout>

@@ -3,8 +3,11 @@ package com.droidkit.pickers.map;
 import android.animation.Animator;
 import android.animation.ValueAnimator;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
+import android.location.Address;
 import android.location.Location;
 import android.location.LocationManager;
 import android.os.Bundle;
@@ -27,6 +30,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import com.droidkit.file.R;
+import com.droidkit.pickers.map.util.Dimen;
 import com.droidkit.pickers.map.util.OrientationHelper;
 import com.droidkit.pickers.view.SearchViewHacker;
 import com.google.android.gms.maps.CameraUpdateFactory;
@@ -42,17 +46,18 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 
+
 public class MapPickerActivity extends Activity
         implements
-        GoogleMap.OnMyLocationChangeListener,
         AdapterView.OnItemClickListener,
+        GoogleMap.OnMyLocationChangeListener,
         GoogleMap.OnMapLongClickListener,
-        GoogleMap.OnMarkerClickListener, AbsListView.OnScrollListener {
+        GoogleMap.OnMarkerClickListener,
+        AbsListView.OnScrollListener, GoogleMap.OnMapClickListener, GoogleMap.OnCameraChangeListener {
 
     private static final String LOG_TAG = "MapPickerActivity";
     private GoogleMap mMap; // Might be null if Google Play services APK is not available.
     private Location currentLocation;
-    private LatLng geoData;
 
     private PlaceFetchingTask fetchingTask;
     private Marker currentPick;
@@ -67,15 +72,20 @@ public class MapPickerActivity extends Activity
     private View listHolder;
     private View mapHolder;
     private View defineMyLocationButton;
-    private TextView accuranceView;
-    private View pickCurrent;
+    private TextView accuracyView;
+    private View pickCurrentLocationButton;
 
     private HashMap<String, Marker> markers;
     private ArrayList<MapItem> places;
+    private View controllers;
+    private TextView title;
+    private TextView subtitle;
+    private Address currentPickedAddress;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        Dimen.initialize(this);
         setContentView(R.layout.picker_activity_map_picker);
         list = (ListView) findViewById(R.id.list);
         list.setOnScrollListener(this);
@@ -86,8 +96,17 @@ public class MapPickerActivity extends Activity
         header = findViewById(R.id.header);
         listHolder = findViewById(R.id.listNearbyHolder);
         mapHolder = findViewById(R.id.mapholder);
-        accuranceView = (TextView) findViewById(R.id.accurance);
-
+        accuracyView = (TextView) findViewById(R.id.accurance);
+        mapHolder.post(new Runnable() {
+            @Override
+            public void run() {
+                if(OrientationHelper.getScreenOrientation(getWindowManager())==OrientationHelper.LANDSCAPE){
+                    defaultMapHolderSize = mapHolder.getWidth();
+                }else {
+                    defaultMapHolderSize = mapHolder.getHeight();
+                }
+            }
+        });
         setUpMapIfNeeded();
 
         getActionBar().setDisplayHomeAsUpEnabled(true);
@@ -124,23 +143,47 @@ public class MapPickerActivity extends Activity
             }
         });
 
-        pickCurrent = findViewById(R.id.pick_current);
-        pickCurrent.setOnClickListener(new View.OnClickListener() {
+        pickCurrentLocationButton = findViewById(R.id.pick_current);
+        pickCurrentLocationButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                if(currentLocation!=null){
+                if (currentLocation != null) {
                     Intent returnIntent = new Intent();
                     returnIntent.putExtra("latitude", currentLocation.getLatitude());
                     returnIntent.putExtra("longitude", currentLocation.getLongitude());
 
                     setResult(RESULT_OK, returnIntent);
                     finish();
+                } else {
+                    final LocationManager manager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+
+                    if (manager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+                            || manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                        Toast.makeText(MapPickerActivity.this, R.string.picker_map_pick_my_wait, Toast.LENGTH_SHORT).show();
+                    } else {
+                        buildAlertMessageNoGps();
+                        accuracyView.setText(R.string.picker_map_gps_off);
+                    }
                 }
             }
         });
 
+        final LocationManager manager = (LocationManager) getSystemService( Context.LOCATION_SERVICE );
 
-        // we dont need these buttons
+        if ( manager.isProviderEnabled( LocationManager.GPS_PROVIDER )
+                || manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) ) {
+            // okay navigation is enabled
+        }else {
+            buildAlertMessageNoGps();
+            accuracyView.setText(R.string.picker_map_gps_off);
+        }
+
+
+
+
+        controllers = findViewById(R.id.controllers);
+        title = (TextView) findViewById(R.id.title);
+        subtitle = (TextView) findViewById(R.id.subtitle);
         select = findViewById(R.id.select);
         select.setEnabled(false);
         // findViewById(R.id.select_text).setEnabled(false);
@@ -148,9 +191,12 @@ public class MapPickerActivity extends Activity
             @Override
             public void onClick(View view) {
                 Intent returnIntent = new Intent();
+                LatLng geoData = currentPick.getPosition();
                 returnIntent.putExtra("latitude", geoData.latitude);
                 returnIntent.putExtra("longitude", geoData.longitude);
-
+                if(currentPickedAddress!=null)
+                    if(currentPickedAddress.getMaxAddressLineIndex()>0)
+                        returnIntent.putExtra("street", currentPickedAddress.getAddressLine(0));
                 setResult(RESULT_OK, returnIntent);
                 finish();
             }
@@ -164,120 +210,179 @@ public class MapPickerActivity extends Activity
         });*/
     }
 
-    private int defaultHeight = 0;
-    protected void togglePlacesList() {
-        // todo animate it
-        if (listHolder.getVisibility() == View.GONE) {
-
-            fullSizeButton.setEnabled(false);
-            float startSize;
-            if(OrientationHelper.getScreenOrientation(getWindowManager())==OrientationHelper.LANDSCAPE){
-                startSize = findViewById(R.id.container).getWidth();
-            }else
-                startSize = findViewById(R.id.container).getHeight();
-
-            final ValueAnimator valueAnimator = ValueAnimator.ofFloat(startSize, defaultHeight);
-            valueAnimator.setDuration(300);
-            valueAnimator.setInterpolator(new AccelerateInterpolator());
-            valueAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
-                @Override
-                public void onAnimationUpdate(ValueAnimator valueAnimator) {
-
-                    if(OrientationHelper.getScreenOrientation(getWindowManager())==OrientationHelper.LANDSCAPE) {
-                        mapHolder.getLayoutParams().width = ((Float) valueAnimator.getAnimatedValue()).intValue();
-                    }else{
-                        mapHolder.getLayoutParams().height = ((Float) valueAnimator.getAnimatedValue()).intValue();
+    private void buildAlertMessageNoGps() {
+        final AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setMessage("Your GPS seems to be disabled, do you want to enable it?")
+                .setCancelable(false)
+                .setPositiveButton("Yes", new DialogInterface.OnClickListener() {
+                    public void onClick(@SuppressWarnings("unused") final DialogInterface dialog, @SuppressWarnings("unused") final int id) {
+                        startActivity(new Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS));
                     }
-                    mapHolder.requestLayout();
-                }
-            });
-            valueAnimator.addListener(new Animator.AnimatorListener() {
-                @Override
-                public void onAnimationStart(Animator animator) {
+                })
+                .setNegativeButton("No", new DialogInterface.OnClickListener() {
+                    public void onClick(final DialogInterface dialog, @SuppressWarnings("unused") final int id) {
+                        dialog.cancel();
+                    }
+                });
+        final AlertDialog alert = builder.create();
+        alert.show();
+    }
 
-                }
-
-                @Override
-                public void onAnimationEnd(Animator animator) {
-                    fullSizeButton.setEnabled(true);
-                }
-
-                @Override
-                public void onAnimationCancel(Animator animator) {
-
-                }
-
-                @Override
-                public void onAnimationRepeat(Animator animator) {
-
-                }
-            });
-            valueAnimator.start();
-
-            listHolder.setVisibility(View.VISIBLE);
-            fullSizeButton.setImageResource(R.drawable.picker_map_fullscreen_icon);
+    private int defaultMapHolderSize = 0;
+    protected void togglePlacesList() {
+        if (listHolder.getVisibility() == View.GONE) {
+            showPlacesList();
         } else {
-
-            fullSizeButton.setEnabled(false);
-            float endSize = findViewById(R.id.container).getHeight();
-            defaultHeight = mapHolder.getHeight();
-
-            final ValueAnimator valueAnimator = ValueAnimator.ofFloat(defaultHeight, endSize);
-            valueAnimator.setDuration(300);
-            valueAnimator.setInterpolator(new AccelerateInterpolator());
-            valueAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
-                @Override
-                public void onAnimationUpdate(ValueAnimator valueAnimator) {
-                    mapHolder.getLayoutParams().height = ((Float) valueAnimator.getAnimatedValue()).intValue();
-                    mapHolder.requestLayout();
-                }
-            });
-            valueAnimator.addListener(new Animator.AnimatorListener() {
-                @Override
-                public void onAnimationStart(Animator animator) {
-
-                }
-
-                @Override
-                public void onAnimationEnd(Animator animator) {
-                    fullSizeButton.setEnabled(true);
-                }
-
-                @Override
-                public void onAnimationCancel(Animator animator) {
-
-                }
-
-                @Override
-                public void onAnimationRepeat(Animator animator) {
-
-                }
-            });
-
-
-            AlphaAnimation hideAnimation = new AlphaAnimation(1,0);
-            hideAnimation.setDuration(300);
-            hideAnimation.setInterpolator(new AccelerateInterpolator());
-            hideAnimation.setAnimationListener(new Animation.AnimationListener() {
-                @Override
-                public void onAnimationStart(Animation animation) {
-
-                }
-
-                @Override
-                public void onAnimationEnd(Animation animation) {
-                    fullSizeButton.setImageResource(R.drawable.picker_map_halfscreen_icon);
-                    listHolder.setVisibility(View.GONE);
-                    valueAnimator.start();
-                }
-
-                @Override
-                public void onAnimationRepeat(Animation animation) {
-
-                }
-            });
-            listHolder.startAnimation(hideAnimation);
+            hidePlacesList();
         }
+    }
+
+    private boolean hiding;
+    private void hidePlacesList() {
+        if(currentPick!=null){
+
+        }else {
+            if (listHolder.getVisibility() == View.GONE || hiding) {
+                return;
+            }
+        }
+
+        fullSizeButton.setEnabled(false);
+        hiding = true;
+        float endSize;// = findViewById(R.id.container).getHeight();
+
+        int currentMapHolderSize;
+        if(OrientationHelper.getScreenOrientation(getWindowManager())==OrientationHelper.LANDSCAPE){
+            endSize = findViewById(R.id.container).getWidth();
+            currentMapHolderSize = mapHolder.getWidth();
+        }else {
+            endSize = findViewById(R.id.container).getHeight();
+            if(currentPick!=null) {
+                endSize -= getResources().getDimension(R.dimen.picker_map_controllers_height);
+            }
+            currentMapHolderSize = mapHolder.getHeight();
+        }
+
+        final ValueAnimator valueAnimator = ValueAnimator.ofFloat(currentMapHolderSize, endSize);
+        valueAnimator.setDuration(300);
+        valueAnimator.setInterpolator(new AccelerateInterpolator());
+        valueAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+            @Override
+            public void onAnimationUpdate(ValueAnimator valueAnimator) {
+
+                if(OrientationHelper.getScreenOrientation(getWindowManager())==OrientationHelper.LANDSCAPE) {
+                    mapHolder.getLayoutParams().width = ((Float) valueAnimator.getAnimatedValue()).intValue();
+                }else{
+                    mapHolder.getLayoutParams().height = ((Float) valueAnimator.getAnimatedValue()).intValue();
+                }
+                mapHolder.requestLayout();
+            }
+        });
+        valueAnimator.addListener(new Animator.AnimatorListener() {
+            @Override
+            public void onAnimationStart(Animator animator) {
+
+            }
+
+            @Override
+            public void onAnimationEnd(Animator animator) {
+                fullSizeButton.setEnabled(true);
+                hiding = false;
+            }
+
+            @Override
+            public void onAnimationCancel(Animator animator) {
+
+            }
+
+            @Override
+            public void onAnimationRepeat(Animator animator) {
+
+            }
+        });
+
+
+        AlphaAnimation hideAnimation = new AlphaAnimation(1,0);
+        hideAnimation.setDuration(300);
+        hideAnimation.setInterpolator(new AccelerateInterpolator());
+        hideAnimation.setAnimationListener(new Animation.AnimationListener() {
+            @Override
+            public void onAnimationStart(Animation animation) {
+
+            }
+
+            @Override
+            public void onAnimationEnd(Animation animation) {
+                fullSizeButton.setImageResource(R.drawable.picker_map_halfscreen_icon);
+                listHolder.setVisibility(View.GONE);
+                valueAnimator.start();
+            }
+
+            @Override
+            public void onAnimationRepeat(Animation animation) {
+
+            }
+        });
+        if(listHolder.getVisibility()!=View.GONE) {
+            listHolder.startAnimation(hideAnimation);
+        }else{
+            valueAnimator.start();
+        }
+    }
+    private boolean showing;
+    private void showPlacesList() {
+        if(listHolder.getVisibility()==View.VISIBLE || showing){
+            return;
+        }
+        showing = true;
+        fullSizeButton.setEnabled(false);
+        float startSize;
+        if(OrientationHelper.getScreenOrientation(getWindowManager())==OrientationHelper.LANDSCAPE){
+            startSize = findViewById(R.id.container).getWidth();
+        }else
+            startSize = findViewById(R.id.container).getHeight();
+
+        final ValueAnimator valueAnimator = ValueAnimator.ofFloat(startSize, defaultMapHolderSize);
+        valueAnimator.setDuration(300);
+        valueAnimator.setInterpolator(new AccelerateInterpolator());
+        valueAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+            @Override
+            public void onAnimationUpdate(ValueAnimator valueAnimator) {
+
+                if(OrientationHelper.getScreenOrientation(getWindowManager())==OrientationHelper.LANDSCAPE) {
+                    mapHolder.getLayoutParams().width = ((Float) valueAnimator.getAnimatedValue()).intValue();
+                }else{
+                    mapHolder.getLayoutParams().height = ((Float) valueAnimator.getAnimatedValue()).intValue();
+                }
+                mapHolder.requestLayout();
+            }
+        });
+        valueAnimator.addListener(new Animator.AnimatorListener() {
+            @Override
+            public void onAnimationStart(Animator animator) {
+
+            }
+
+            @Override
+            public void onAnimationEnd(Animator animator) {
+                fullSizeButton.setEnabled(true);
+                showing = false;
+            }
+
+            @Override
+            public void onAnimationCancel(Animator animator) {
+
+            }
+
+            @Override
+            public void onAnimationRepeat(Animator animator) {
+
+            }
+        });
+        valueAnimator.start();
+
+        listHolder.setVisibility(View.VISIBLE);
+        fullSizeButton.setImageResource(R.drawable.picker_map_fullscreen_icon);
     }
 
     @Override
@@ -357,22 +462,25 @@ public class MapPickerActivity extends Activity
      */
     private void setUpMap() {
         LocationManager locationManager = (LocationManager) this.getSystemService(Context.LOCATION_SERVICE);
+        Location lastKnownLocation = null;
         for (String provider : locationManager.getAllProviders()) {
-            currentLocation = locationManager.getLastKnownLocation(provider);
-            if (currentLocation != null) {
+            lastKnownLocation = locationManager.getLastKnownLocation(provider);
+            if (lastKnownLocation != null) {
                 break;
             }
         }
 
-        if(currentLocation!=null) {
-            mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(new LatLng(currentLocation.getLatitude(), currentLocation.getLongitude()), 14));
-            fetchPlaces(null);
+        if(lastKnownLocation!=null) {
+            mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(new LatLng(lastKnownLocation.getLatitude(), lastKnownLocation.getLongitude()), 14));
+            //fetchPlaces(null);
         }
         mMap.setOnMyLocationChangeListener(this);
         mMap.getUiSettings().setMyLocationButtonEnabled(false);
         mMap.getUiSettings().setZoomControlsEnabled(false);
         mMap.getUiSettings().setCompassEnabled(false);
         mMap.setMyLocationEnabled(true);
+        mMap.setOnMapClickListener(this);
+        mMap.setOnCameraChangeListener(this);
         mMap.setOnMapLongClickListener(this);
         mMap.setOnMarkerClickListener(this);
     }
@@ -392,16 +500,16 @@ public class MapPickerActivity extends Activity
             protected void onPostExecute(Object o) {
                 Log.i(LOG_TAG, o.toString());
                 if(o instanceof ArrayList){
+                    places = (ArrayList<MapItem>) o;
                     loading.setVisibility(View.GONE);
                     status.setVisibility(View.GONE);
                     header.setVisibility(View.VISIBLE);
                     list.setVisibility(View.VISIBLE);
-                    places = (ArrayList<MapItem>) o;
                     if(places.isEmpty()){
                         status.setText(R.string.picker_map_nearby_empty);
                     }else {
                         list.setAdapter(new PlacesAdapter(MapPickerActivity.this, places));
-                        showItemsOnTheMap(places);
+                        showPlacesOnTheMap(places);
                     }
                 }else {
                     places = new ArrayList<MapItem>();
@@ -427,17 +535,19 @@ public class MapPickerActivity extends Activity
         }
     }
 
-    private void showItemsOnTheMap(ArrayList<MapItem> array) {
-        markers = new HashMap<String, Marker>();
-        for (MapItem mapItem : array) {
-
-          markers.put(mapItem.id,
-                  mMap.addMarker(new MarkerOptions()
-                                  .position(mapItem.getLatLng())
-                                          // .title(mapItem.name)
-                                  .draggable(false)
-                                  .icon(BitmapDescriptorFactory.fromResource(R.drawable.picker_map_marker))
-                  ));
+    private void showPlacesOnTheMap(ArrayList<MapItem> array) {
+        if (currentPick == null) {
+            mMap.clear();
+            markers = new HashMap<String, Marker>();
+            for (MapItem mapItem : array) {
+                markers.put(mapItem.id,
+                        mMap.addMarker(new MarkerOptions()
+                                        .position(mapItem.getLatLng())
+                                                // .title(mapItem.name)
+                                        .draggable(false)
+                                        .icon(BitmapDescriptorFactory.fromResource(R.drawable.picker_map_marker))
+                        ));
+            }
         }
     }
 
@@ -451,51 +561,49 @@ public class MapPickerActivity extends Activity
             mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(new LatLng(location.getLatitude(), location.getLongitude()), 14));
         }
         this.currentLocation = location;;
-        accuranceView.setText(getString(R.string.picker_map_pick_my_accuracy, (int) currentLocation.getAccuracy()));
+        accuracyView.setText(getString(R.string.picker_map_pick_my_accuracy, (int) currentLocation.getAccuracy()));
         Log.d("Location changed", location.toString());
     }
 
     @Override
     public void onItemClick(AdapterView<?> adapterView, View view, int position, long l) {
+
         MapItem mapItem = (MapItem) adapterView.getItemAtPosition(position);
+        if(list.getCheckedItemPosition()!=position){
 
-        // todo show on bottom bar?
-        Intent returnIntent = new Intent();
-        returnIntent.putExtra("latitude", mapItem.getLatLng().latitude);
-        returnIntent.putExtra("longitude", mapItem.getLatLng().longitude);
-        returnIntent.putExtra("street", mapItem.vicinity);
-        returnIntent.putExtra("place", mapItem.name);
+            mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(
+                    new LatLng(mapItem.getLatLng().latitude, mapItem.getLatLng().longitude),
+                    16));
+            list.setItemChecked(position, true);
+            list.smoothScrollToPosition(position);
+        }else {
+            Intent returnIntent = new Intent();
+            returnIntent.putExtra("latitude", mapItem.getLatLng().latitude);
+            returnIntent.putExtra("longitude", mapItem.getLatLng().longitude);
+            returnIntent.putExtra("street", mapItem.vicinity);
+            returnIntent.putExtra("place", mapItem.name);
 
-        setResult(RESULT_OK, returnIntent);
-        finish();
-
-        /*
-        select.setEnabled(true);
-        findViewById(R.id.select_text).setEnabled(true);
-        geoData = mapItem.getLatLng();
-        mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(geoData, 16));
-        */
+            setResult(RESULT_OK, returnIntent);
+            finish();
+        }
 
     }
 
     @Override
     public void onMapLongClick(LatLng latLng) {
-        select.setEnabled(true);
-        findViewById(R.id.select_text).setEnabled(true);
-        //mMap.clear();
 
-        // geoData = latLng;
+
         if(currentPick==null) {
+            mMap.clear();
             MarkerOptions currentPickOptions = new MarkerOptions()
                     .draggable(true)
-                    .position(geoData);
-
-            //currentPick = mMap.addMarker(currentPickOptions);
+                    .position(latLng);
+            currentPick = mMap.addMarker(currentPickOptions);
         }else{
-
-            //currentPick.setPosition(geoData);
+            currentPick.setPosition(latLng);
         }
 
+        showMapCurrentPin();
 
     }
 
@@ -545,6 +653,71 @@ public class MapPickerActivity extends Activity
 
     @Override
     public void onScroll(AbsListView absListView, int i, int i2, int i3) {
+
+    }
+
+    public void showMapCurrentPin(){
+
+        // todo animate
+
+        fullSizeButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                currentPick = null;
+                controllers.setVisibility(View.GONE);
+                showPlacesList();
+                showPlacesOnTheMap(places);
+                fullSizeButton.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        togglePlacesList();
+                    }
+                });
+            }
+        });
+        hidePlacesList();
+        controllers.setVisibility(View.VISIBLE);
+        select.setEnabled(true);
+        title.setText(R.string.picker_loading);
+        subtitle.setText("");
+        AddressTask task = new AddressTask(this, currentPick.getPosition()) {
+            @Override
+            protected void onPostExecute(Address s) {
+
+                currentPickedAddress = s;
+                if(s!=null) {
+                    if(s.getMaxAddressLineIndex()>0){
+                        title.setText(s.getAddressLine(0));
+                    }
+                    if(s.getLocality()!=null){
+                        subtitle.setText(s.getLocality() + ", " + s.getCountryName());
+                    }else{
+                        if (s.getCountryName() != null) {
+                            subtitle.setText(s.getCountryName());
+                        }
+                    }
+                }else{
+                    title.setText(R.string.picker_empty);
+                    subtitle.setText("");
+                }
+            }
+        };
+        task.execute();
+
+    }
+
+    private void hideMapCurrentPin() {
+
+    }
+    @Override
+    public void onMapClick(LatLng latLng) {
+        if(currentPick!=null){
+            // todo hide current pick?
+        }
+    }
+
+    @Override
+    public void onCameraChange(CameraPosition cameraPosition) {
 
     }
 }
